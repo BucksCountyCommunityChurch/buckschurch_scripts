@@ -171,32 +171,3 @@ class SocketConnection:
         # Return False to re-raise any exception that occurred inside the 'with' block
         return False
 
-
-
-CAM_ON  = bytearray.fromhex('8101040002ff')
-CAM_OFF  = bytearray.fromhex('8101040003ff')
-
-command=CAM_ON
-
-def send_command(host,command):
-
-    port = PROTO3K_PORT
-    print("Connecting to {host}:{port}")
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    try:
-        s.settimeout(0.5)
-        s.connect((host, port))
-        print("Connected")
-        s.sendall(command)
-        data = s.recv(1024)
-        print("Command Sent")
-        s.close()
-        print("Connection Closed")
-    except Exception as ex:
-        print("Error Sending command ", repr(ex))
-    time.sleep(2)
-
-
-if __name__ == "__main__":
-    send_command(CAM_ON)
-
