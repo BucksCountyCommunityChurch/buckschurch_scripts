@@ -1,0 +1,1 @@
+"C:\Program Files\Python39\python.exe" "C:\Users\BCCC\Documents\GitHub\buckschurch_scripts\automation\atem_switch.py"
