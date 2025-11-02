@@ -62,10 +62,11 @@ class Protocol3k:
 
             # 4. Receive the response message
             data = self._sock.recv(1024)
-            print(f"[{self._host}:{self._port}] Response Received: {data}")
+            print(f"[{self._host}:{self._port}] Response Received: (len={len(data)}): {data!r}")
+            decoded_data=data.decode('utf-8')
 
             # 5. Handle the response and log the handler output
-            resp_msg = msg.handle_response(data)
+            resp_msg = msg.handle_response(decoded_data)
             if resp_msg:
                 print(f"[{self._host}:{self._port}] {resp_msg}")
         except Exception as ex:
@@ -96,7 +97,7 @@ class Route(Proto3kMessage):
         self.source=source
     
     def get_command(self) -> str:
-        return "#ROUTE\ {self.layer},{self.dest},{self.source}\r"
+        return f"#ROUTE {self.layer},{self.dest},{self.source}\r"
 
     def handle_response(self, response: str):
         resp = self._parse_response(response)
