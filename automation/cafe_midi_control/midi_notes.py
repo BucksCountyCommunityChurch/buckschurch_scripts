@@ -62,3 +62,6 @@ NOTE_MAP["D#4"] = NOTE_DSHARP4
 # E4 (MIDI Note Number 64, Hex 0x40)
 NOTE_E4 = 64
 NOTE_MAP["E4"] = NOTE_E4
+
+# Create a reverse lookup map (e.g., 48 -> "C3")
+NOTE_LOOKUP = {v: k for k, v in NOTE_MAP.items()}

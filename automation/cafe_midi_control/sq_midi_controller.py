@@ -8,11 +8,8 @@ from typing import Optional, Any, List
 import sq_midi_db
 
 # --- IMPORTANT ---
-# You must find the correct TCP port for MIDI communication
-# in the Allen & Heath SQ-MIDI-Protocol PDF.
-# 51325 is a common port for other A&H mixers, but
-# you MUST verify this for the SQ series.
-SQ_MIDI_PORT = 51325
+# Port is now defined in 'presets.yaml' and passed to SocketConnection.
+# Removed: SQ_MIDI_PORT = 51325
 
 
 # --- Helper functions for conversion ---
