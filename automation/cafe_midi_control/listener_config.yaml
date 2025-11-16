@@ -1,0 +1,68 @@
+# listener_config.yaml
+#
+# Contains all configuration for the listener and device presets.
+#
+# --- Configuration ---
+# Define device connection details and listener settings.
+config:
+  midi_listener:
+    # MIDI Channel to listen on (1-16)
+    channel: 1
+
+  SQ:
+    ip: "192.168.7.158"
+    port: 51325
+
+  Kramer:
+    ip: "192.168.7.100"
+    port: 5000
+
+# --- Presets ---
+# Define command sequences to be triggered by MIDI notes.
+# Note names MUST match the keys in midi_notes.py (e.g., "C3", "C#3").
+#
+# --- SQ Commands ---
+# - "RecallScene": <scene_number>
+# - "SetMute": [ <from_ch>, <to_ch>, <true_or_false> ]
+# - "SetFaderLevel": [ <from_ch>, <to_ch>, <level_in_db> ]
+# - "SetPan": [ <from_ch>, <to_ch>, <pan_value_neg100_to_pos100> ]
+# - "SetAssign": [ <from_ch>, <to_ch>, <true_or_false> ]
+# - "Wait": <seconds>
+#
+# --- Kramer Commands ---
+# - "Route": <source_number>
+#
+presets:
+  "C3":
+    "SQ":
+      - "RecallScene": 1
+      - "Wait": 2.5
+      - "SetMute": [ "IP1", "LR", false ]
+      - "SetMute": [ "LR", "LR", false ]
+      - "SetFaderLevel": [ "IP1", "LR", 0.0 ]
+      - "SetMute": [ "IP2", "LR", true ]
+      - "SetMute": [ "IP3", "LR", true ]
+      - "SetMute": [ "IP4", "LR", true ]
+      - "SetMute": [ "IP5", "LR", true ]
+      - "SetMute": [ "IP6", "LR", true ]
+      - "SetMute": [ "IP7", "LR", true ]
+      - "SetMute": [ "IP8", "LR", true ]
+    "Kramer":
+      - "Route": 1
+
+  "D3":
+    "SQ":
+      - "RecallScene": 2
+      - "Wait": 2.5
+      - "SetMute": [ "IP2", "LR", false ]
+      - "SetMute": [ "LR", "LR", false ]
+      - "SetFaderLevel": [ "IP2", "LR", 0.0 ]
+      - "SetMute": [ "IP1", "LR", true ]
+      - "SetMute": [ "IP3", "LR", true ]
+      - "SetMute": [ "IP4", "LR", true ]
+      - "SetMute": [ "IP5", "LR", true ]
+      - "SetMute": [ "IP6", "LR", true ]
+      - "SetMute": [ "IP7", "LR", true ]
+      - "SetMute": [ "IP8", "LR", true ]
+    "Kramer":
+      - "Route": 2
