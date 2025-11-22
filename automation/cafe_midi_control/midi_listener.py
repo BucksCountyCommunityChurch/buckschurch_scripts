@@ -183,6 +183,9 @@ def parse_midi_message(data: bytes, sq_ctrl: SQMidiProtocol, kramer_ctrl: Kramer
                     if note_name and note_name in presets:
                         actions = presets[note_name]
                         execute_preset(note_name, actions, sq_ctrl, kramer_ctrl)
+                    elif note in presets:
+                        actions = presets[note]
+                        execute_preset(note_name, actions, sq_ctrl, kramer_ctrl)
                     else:
                         print(f"[MIDI IN] Note {note} ('{note_name}') has no preset assigned.")
                     
