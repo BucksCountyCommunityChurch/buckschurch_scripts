@@ -94,23 +94,46 @@ class Route(KramerMessage):
     LAYER_VIDEO=1
     LAYER_USB=5
     def __init__(self, source: int, dest: int = 1, layer: int = LAYER_VIDEO):
-        self.command="Route"
+        self.command="ROUTE"
         self.layer = layer
         self.dest = dest
         self.source = int(source)
     
     def get_command(self) -> str:
-        return f"#ROUTE {self.layer},{self.dest},{self.source}\r"
+        return f"#{self.command} {self.layer},{self.dest},{self.source}\r"
 
     def handle_response(self, response: str):
         resp = self._parse_response(response)
-        if not resp or resp.get('command') != "ROUTE":
+        if not resp or resp.get('command') != self.command:
            raise RuntimeError(f"Incorrect response '{resp.get('command')}' from Kramer device {resp.get('device')}" )
         params = resp['params'].split(',')
         msg =  f"Response from Kramer device {resp['device']}: {resp['command']}:" + os.linesep
         msg += f"  layer = {params[0]}" + os.linesep
         msg += f"  dest  = {params[1]}" + os.linesep
         msg += f"  src   = {params[2]}"
+        return msg
+
+class VideoMute(KramerMessage):
+    VMUTE_ENABLE=0
+    VMUTE_DISABLE=1
+    VMUTE_BLANK=2
+
+    def __init__(self, dest: int = 1, flag: int=VMUTE_ENABLE):
+        self.command="VMUTE"
+        self.dest = dest
+        self.flag = flag
+    
+    def get_command(self) -> str:
+        return f"#{self.command} {self.dest},{self.flag}\r"
+
+    def handle_response(self, response: str):
+        resp = self._parse_response(response)
+        if not resp or resp.get('command') != self.command:
+           raise RuntimeError(f"Incorrect response '{resp.get('command')}' from Kramer device {resp.get('device')}" )
+        params = resp['params'].split(',')
+        msg =  f"Response from Kramer device {resp['device']}: {resp['command']}:" + os.linesep
+        msg += f"  dest  = {params[0]}" + os.linesep
+        msg += f"  flag  = {params[1]}"
         return msg
 
 # --- Context Manager Class ---
