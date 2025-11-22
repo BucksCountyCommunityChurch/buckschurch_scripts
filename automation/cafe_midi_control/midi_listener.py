@@ -22,10 +22,11 @@ from sq_midi_controller import (
 )
 
 # --- Import Kramer Controller Code ---
-from kramer_controller import (
+from proto3k import (
     KramerSocketConnection,
     KramerProtocol,
-    Route as KramerRoute
+    Route as KramerRoute,
+    VideoMute as KramerVideoMute
 )
 
 # --- Import MIDI Note Definitions ---
@@ -144,6 +145,11 @@ def execute_preset(preset_name: str, actions: dict, sq_ctrl: SQMidiProtocol, kra
                     # Support for optional dest/layer from YAML in the future
                     # For now, assumes args is just the source
                     kramer_ctrl.send_message(KramerRoute(source=int(args)))
+                
+                elif command == "VideoMute":
+                    # Support for optional dest/layer from YAML in the future
+                    # For now, assumes args is just the enable/disable/blank flags
+                    kramer_ctrl.send_message(KramerVideoMute(flag=int(args)))
                 
                 else:
                     print(f"Warning: Unknown Kramer command '{command}' in preset.")
