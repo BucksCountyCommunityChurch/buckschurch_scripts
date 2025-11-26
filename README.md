@@ -28,11 +28,11 @@ The core functionality revolves around a MIDI listener that integrates the SQ mi
   - `kasa`: For Kasa smart plug control (install via `pip install kasa`).
   - No additional installs needed for core socket-based scripts (e.g., MIDI, Protocol 3000, VISCA).
 - **Hardware/Network Setup**:
-  - Allen & Heath SQ Mixer (e.g., at IP `192.168.7.158:51325`).
-  - Kramer Video Switcher (e.g., SWT3-41-H at IP `192.168.7.100:5000` or `192.168.1.208:5000`).
-  - PTZ Optics Cameras (e.g., at IPs `192.168.1.60-62:5678`).
+  - Allen & Heath SQ Mixer (e.g., at IP `192.168.x.x:51325`).
+  - Kramer Video Switcher (e.g., SWT3-41-H at IP `192.168.x.x:5000` or `192.168.x.x:5000`).
+  - PTZ Optics Cameras (e.g., at IPs `192.168.x.x-62:5678`).
   - Kasa Smart Strips/Plugs controlling TVs (discoverable on the network).
-  - Blackmagic ATEM Switcher (e.g., at IP `192.168.1.35`).
+  - Blackmagic ATEM Switcher (e.g., at IP `192.168.x.x`).
   - Network access to all devices (update IPs in scripts/config as needed).
 - **Operating System**: Scripts are cross-platform but tested on Windows (e.g., `.bat` and `.ps1` files). For macOS/Linux, adapt as needed.
 - **Documentation**: The repository includes `protocol_3000_3.0_master_user.pdf` for Kramer Protocol 3000 reference.
