@@ -18,8 +18,6 @@ The core functionality revolves around a MIDI listener that integrates the SQ mi
   - [Audio Distribution](#audio-distribution)
 - [Usage Examples](#usage-examples)
 - [Troubleshooting](#troubleshooting)
-- [Contributing](#contributing)
-- [License](#license)
 
 ## Prerequisites
 
