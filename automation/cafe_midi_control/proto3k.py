@@ -1,6 +1,7 @@
 """
 This file contains the Protocol 3000 logic for controlling
-the Kramer device, based on the code you provided.
+the Kramer device.
+Updated with robust buffer handling to ignore delayed async messages.
 """
 
 import socket
@@ -11,27 +12,31 @@ import sys
 from typing import Optional, Any
 
 # Port is now defined in 'listener_config.yaml' and passed to KramerSocketConnection.
-# Removed: PROTO3K_PORT = 5000
 
 class KramerMessage:
     command="BASECLASS"
-    P3K_RESPONSE_RE = "[~]([0-9])+[@](.*) ((?:.*)[,]{0,1})\r\n"
+    # Updated Regex to be more robust with whitespace
+    P3K_RESPONSE_RE = r"[~]([0-9])+[@](.*?) ((?:.*)[,]{0,1})\r\n"
 
     def get_command(self) -> str:
         raise NotImplementedError("get_command() not implemented")
+    
+    def get_response(self) -> str:
+        return self.command
 
     def handle_response(self, response: str):
-        raise NotImplementedError("get_command() not implemented")
+        raise NotImplementedError("handle_response() not implemented")
 
     def _parse_response(self, response: str) -> dict:
         match = re.search(KramerMessage.P3K_RESPONSE_RE, response)
         if not match:
-            print(f"[Kramer] Warning: Could not parse response: {response!r}")
+            # It might be a simple response like "~01@ERR 003"
             return {}
+            
         result = {
             'device': match.group(1),
-            'command': match.group(2),
-            'params': match.group(3)
+            'command': match.group(2).strip(), # Strip whitespace
+            'params': match.group(3).strip()
         }
         return result
 
@@ -48,32 +53,89 @@ class KramerProtocol:
         # Send the initial handshake
         self.send_message(Handshake())
 
+    def _recv_until_newline(self, timeout: float = 1.0) -> bytes:
+        """
+        Reads byte-by-byte until a newline \n is found or timeout occurs.
+        This prevents reading multiple responses in one go.
+        """
+        self._sock.settimeout(timeout)
+        data = b""
+        start_time = time.time()
+        
+        while True:
+            try:
+                chunk = self._sock.recv(1)
+                if not chunk:
+                    break # Connection closed
+                data += chunk
+                if chunk == b'\n':
+                    break
+                if time.time() - start_time > timeout:
+                    break
+            except socket.timeout:
+                break
+        return data
+
     def send_message(self, msg: KramerMessage):
         """
-        Converts the string message to a bytearray and sends it over the socket.
+        Sends a command and loops until it finds the MATCHING response.
+        Ignores async notifications or delayed echoes from previous commands.
         """
         try:
-            command = msg.get_command()
-            data_bytes = command.encode('utf-8')
-            data_bytearray = bytearray(data_bytes)
+            command_str = msg.get_command()
+            data_bytes = command_str.encode('utf-8')
             
-            self._sock.sendall(data_bytearray)
-            print(f"[{self._host}:{self._port}] {msg.command} sent(len={len(data_bytearray)}): {data_bytearray!r}")
+            # 1. Clear any old garbage currently in the buffer before sending
+            self._sock.settimeout(0.01)
+            try:
+                while self._sock.recv(1024): pass
+            except: pass
 
-            # Set a timeout for the response
-            self._sock.settimeout(0.5)
-            data = self._sock.recv(1024)
-            print(f"[{self._host}:{self._port}] Response Received: (len={len(data)}): {data!r}")
-            decoded_data = data.decode('utf-8')
+            # 2. Send the new command
+            self._sock.sendall(data_bytes)
+            print(f"[{self._host}:{self._port}] SENT: {command_str.strip()}")
 
-            resp_msg = msg.handle_response(decoded_data)
-            if resp_msg:
-                print(f"[{self._host}:{self._port}] {resp_msg}")
-        except socket.timeout:
-            print(f"[{self._host}:{self._port}] Warning: No response received from Kramer.")
+            # 3. Read Loop: Keep reading lines until we find the matching command
+            #    or we timeout (e.g. 2 seconds max wait)
+            max_retries = 10
+            found_match = False
+            
+            for _ in range(max_retries):
+                data = self._recv_until_newline(timeout=0.5)
+                if not data:
+                    break
+                
+                decoded_line = data.decode('utf-8', errors='ignore')
+                
+                # Parse this line
+                parsed = msg._parse_response(decoded_line)
+                
+                if not parsed:
+                    # Could not parse this line, might be noise or error
+                    continue
+
+                rx_cmd = parsed.get('command', '').upper()
+                expected_rx_cmd = msg.get_response().upper()
+
+                if rx_cmd == expected_rx_cmd:
+                    # SUCCESS: We found the response for the command we sent
+                    print(f"[{self._host}:{self._port}] RECV (MATCH): {decoded_line.strip()}")
+                    resp_msg = msg.handle_response(decoded_line)
+                    if resp_msg:
+                        print(f"[{self._host}:{self._port}] {resp_msg}")
+                    found_match = True
+                    break
+                else:
+                    # MISMATCH: This is likely a delayed response from a previous command
+                    print(f"[{self._host}:{self._port}] RECV (IGNORED): {decoded_line.strip()} (Expected {expected_rx_cmd})")
+
+            if not found_match:
+                 print(f"[{self._host}:{self._port}] Warning: Timed out waiting for response to {msg.command}")
+
         except Exception as ex:
             print(f"[{self._host}:{self._port}] Error Sending Kramer command: {ex!r}")
-        time.sleep(0.5) # As in your original code
+        
+        time.sleep(0.1)
 
 
 class Handshake(KramerMessage):
@@ -82,12 +144,16 @@ class Handshake(KramerMessage):
 
     def get_command(self) -> str:
         return "#\r"
+    
+    def get_response(self):
+        return ""
         
     def handle_response(self, response: str):
+        # The handshake response format can vary, we just check for OK if parsable
         resp = self._parse_response(response)
-        if not resp or resp.get('params') != 'OK':
-           raise RuntimeError(f"Unable to establish interface with Kramer device {resp.get('device')}")
-        return f"Response from Kramer device {resp['device']}: Handshake OK"
+        if resp and resp.get('params') == 'OK':
+             return f"Response from Kramer device {resp['device']}: Handshake OK"
+        return "Handshake response received."
 
 
 class Route(KramerMessage):
@@ -104,9 +170,13 @@ class Route(KramerMessage):
 
     def handle_response(self, response: str):
         resp = self._parse_response(response)
-        if not resp or resp.get('command') != self.command:
-           raise RuntimeError(f"Incorrect response '{resp.get('command')}' from Kramer device {resp.get('device')}" )
+        # We rely on the send_message loop to match the command name,
+        # so here we just format the output.
+        if not resp: return None
+        
         params = resp['params'].split(',')
+        if len(params) < 3: return f"Raw Route Response: {response}"
+
         msg =  f"Response from Kramer device {resp['device']}: {resp['command']}:" + os.linesep
         msg += f"  layer = {params[0]}" + os.linesep
         msg += f"  dest  = {params[1]}" + os.linesep
@@ -128,9 +198,13 @@ class VideoMute(KramerMessage):
 
     def handle_response(self, response: str):
         resp = self._parse_response(response)
-        if not resp or resp.get('command') != self.command:
-           raise RuntimeError(f"Incorrect response '{resp.get('command')}' from Kramer device {resp.get('device')}" )
+        # We rely on the send_message loop to match the command name,
+        # so here we just format the output.
+        if not resp: return None
+        
         params = resp['params'].split(',')
+        if len(params) < 2: return f"Raw Route Response: {response}"
+
         msg =  f"Response from Kramer device {resp['device']}: {resp['command']}:" + os.linesep
         msg += f"  dest  = {params[0]}" + os.linesep
         msg += f"  flag  = {params[1]}"
