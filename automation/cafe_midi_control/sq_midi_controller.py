@@ -14,289 +14,302 @@ import sq_midi_db
 
 # --- Helper functions for conversion ---
 
+# --- FADER TAPER MAPPING ---
+# This map is based on the 14-bit MIDI Level derived from the VA (MSB) and VF (LSB)
+# columns of the SQ Mixer's fader taper table, as provided by the user.
+# Level (14-bit) = (VA (7-bit) << 7) | VF (7-bit)
+# Linear interpolation is used between these discrete points for precision.
+FADER_TAPER_MAP = [
+    #   DB,    Level (14-bit integer)
+    (-80.0, 5698),   # 0x2C42
+    (-60.0, 8073),   # 0x3F09
+    (-40.0, 10447),  # 0x514F
+    (-35.0, 11041),  # 0x5621
+    (-30.0, 11634),  # 0x5A72
+    (-25.0, 12228),  # 0x5F44
+    (-20.0, 12822),  # 0x6416
+    (-15.0, 13415),  # 0x6867
+    (-10.0, 14009),  # 0x6D39
+    (-5.0, 14602),   # 0x720A
+    (0.0, 15196),    # 0x765C (Unity)
+    (5.0, 15790),    # 0x7B2E
+    (10.0, 16383)    # 0x7F7F (Max Level)
+]
+
+# --- Helper functions for conversion ---
+
 def db_to_fader_level(db: float) -> int:
     """
-    Converts a dB value to the 14-bit MIDI level (0-16383).
-    Based on the taper in Reference.csv:
-    +10dB = 16383
-    0dB   = 12288
-    -10dB = 8192
-    -30dB = 4096
-    -inf  = 0
+    Converts a dB value to the 14-bit MIDI level (0-16383) using the
+    custom fader taper map. Linear interpolation is used between the 
+    discrete data points provided by the user.
     """
-    # Clip to max/min range
-    if db > 10.0: db = 10.0
-    if db < -90.0: return 0 # Treat anything below -90dB as -inf (0)
+    # 1. Handle clipping/out-of-range values
     
-    if db > 0.0:
-        # +10dB to 0dB range (16383 to 12288)
-        return int(12288 + (db / 10.0) * (16383 - 12288))
-    elif db > -10.0:
-        # 0dB to -10dB range (12288 to 8192)
-        return int(8192 + ((db + 10.0) / 10.0) * (12288 - 8192))
-    elif db > -30.0:
-        # -10dB to -30dB range (8192 to 4096)
-        return int(4096 + ((db + 30.0) / 20.0) * (8192 - 4096))
-    else:
-        # -30dB to -90dB range (4096 to 0) - rough linear guess for the log taper
-        return int(0 + ((db + 90.0) / 60.0) * 4096)
+    # +10dB is the max
+    if db >= 10.0:
+        return 16383 
+    
+    # Treat anything below -80dB as -Inf (0x0000)
+    if db <= -80.0:
+        return 0 
+        
+    # 2. Find the two adjacent points for interpolation
+    
+    # We loop through the map to find the segment (p1, p2) where p1.DB <= db < p2.DB
+    p1_db, p1_level = FADER_TAPER_MAP[0] 
+    p2_db, p2_level = FADER_TAPER_MAP[0]
+    
+    for i in range(1, len(FADER_TAPER_MAP)):
+        db_curr, level_curr = FADER_TAPER_MAP[i]
+        
+        if db <= db_curr:
+            # Found the segment: p1 is the previous point, p2 is the current point
+            p2_db, p2_level = FADER_TAPER_MAP[i]
+            p1_db, p1_level = FADER_TAPER_MAP[i-1]
+            break
+    
+    # 3. Perform linear interpolation
+    
+    # This check prevents division by zero, although the map points are distinct
+    if p2_db == p1_db:
+        return p1_level
+
+    # Interpolation formula: y = y1 + (x - x1) * (y2 - y1) / (x2 - x1)
+    fader_level = p1_level + (db - p1_db) * (p2_level - p1_level) / (p2_db - p1_db)
+    
+    # Round to the nearest integer and ensure it stays within the 14-bit range (0-16383)
+    return int(max(0, min(16383, round(fader_level))))
+
 
 def pan_to_value(pan: float) -> int:
     """
-    Converts a pan value (-100 to +100, where 0 is center) to the 14-bit MIDI value (0-16383).
-    -100 = 0 (Left)
-    0    = 8192 (Center)
-    +100 = 16383 (Right)
+    Converts a Pan/Balance value (-100.0 to +100.0) to the 14-bit MIDI level (0-16383).
+    -100.0 (L100%) = 0
+    0.0 (Center)   = 8192 (0x2000)
+    +100.0 (R100%) = 16383 (0x3FFF)
     """
     if pan < -100.0: pan = -100.0
     if pan > 100.0: pan = 100.0
     
-    # Scale -100 to +100 range to 0 to 16383
+    # Scale from [-100, 100] to [0, 16383]
+    # (pan + 100) / 200 = 0 to 1 scaling
+    # Value = scaled_pan * 16383
+    
+    # Note: 8192 is half of 16384. This formula should be close enough.
     return int(((pan + 100.0) / 200.0) * 16383)
 
 
-class SQMidiMessage:
+def build_nrpn_sequence(midi_channel_idx: int, nrpn_address: int, nrpn_value: int) -> List[bytes]:
     """
-    Base class for all SQ MIDI commands.
+    Generates the four-message MIDI Non-Registered Parameter Number (NRPN) sequence.
+    This is the core communication method for fader, pan, mute, and assign.
+    
+    :param midi_channel_idx: 0-15 (for MIDI Channel 1-16)
+    :param nrpn_address: The 14-bit channel/control address (0-16383)
+    :param nrpn_value: The 14-bit control value (0-16383)
+    :return: A list of four raw MIDI messages as bytes objects.
     """
-    command = "BASECLASS"
+    
+    # 14-bit values are split into 7-bit MSB (Most Significant Byte) and LSB (Least Significant Byte)
+    
+    # NRPN Address (Parameter Number)
+    nrpn_address_msb = (nrpn_address >> 7) & 0x7F # Bits 14-7
+    nrpn_address_lsb = nrpn_address & 0x7F       # Bits 6-0
 
-    def get_command(self) -> List[bytes]:
-        """
-        Returns a list of raw MIDI message bytes to be sent to the mixer.
-        Raises NotImplementedError if not overridden.
-        """
-        raise NotImplementedError("get_command() not implemented")
+    # NRPN Value (Data Entry)
+    nrpn_value_msb = (nrpn_value >> 7) & 0x7F     # Bits 14-7
+    nrpn_value_lsb = nrpn_value & 0x7F           # Bits 6-0
+    
+    # Status byte for Control Change (CC) is 0xB0 + MIDI Channel Index
+    status_byte = 0xB0 | midi_channel_idx
 
-    def handle_response(self, response: bytes):
-        """
-        Handles any immediate response bytes from the mixer.
-        """
-        # By default, do nothing with a response.
-        pass
+    # Message 1: NRPN MSB (CC 99 / 0x63)
+    msg1 = bytes([status_byte, 0x63, nrpn_address_msb])
+    
+    # Message 2: NRPN LSB (CC 98 / 0x62)
+    msg2 = bytes([status_byte, 0x62, nrpn_address_lsb])
+    
+    # Message 3: Data Entry MSB (CC 6 / 0x06)
+    msg3 = bytes([status_byte, 0x06, nrpn_value_msb])
+    
+    # Message 4: Data Entry LSB (CC 38 / 0x26)
+    msg4 = bytes([status_byte, 0x26, nrpn_value_lsb])
 
-
-def build_nrpn_sequence(midi_channel: int, nrpn_address: int, nrpn_value: int) -> List[bytes]:
-    """
-    Helper function to construct the standard 4-message NRPN sequence.
-    :param midi_channel: 0-15 (0 for Channel 1, etc.)
-    :param nrpn_address: The 14-bit address (0-16383) of the control.
-    :param nrpn_value: The 14-bit value (0-16383) to set the control to.
-    :return: A list of 4 raw bytes messages.
-    """
-    # Split 14-bit Address and Value into 7-bit MSB/LSB
-    addr_msb = (nrpn_address >> 7) & 0x7F
-    addr_lsb = nrpn_address & 0x7F
-    val_msb = (nrpn_value >> 7) & 0x7F
-    val_lsb = nrpn_value & 0x7F
-    
-    # Status byte for CC messages on the correct channel
-    status_byte = 0xB0 + midi_channel
-    
-    # 1. NRPN Address MSB (CC #99)
-    msg1 = bytes([status_byte, 99, addr_msb])
-    
-    # 2. NRPN Address LSB (CC #98)
-    msg2 = bytes([status_byte, 98, addr_lsb])
-    
-    # 3. Data Entry MSB (CC #6)
-    msg3 = bytes([status_byte, 6, val_msb])
-    
-    # 4. Data Entry LSB (CC #38)
-    msg4 = bytes([status_byte, 38, val_lsb])
-    
+    # Note: The SQ manual says to send the LSB (CC 38) as the last command.
     return [msg1, msg2, msg3, msg4]
 
 
-class SQMidiProtocol:
-    """
-    Manages the TCP/IP connection and sending/receiving of MIDI messages.
-    """
-    def __init__(self, sock: socket.socket, host: str, port: int):
-        self._sock = sock
-        self._host = host
-        self._port = port
-        print(f"[{host}:{port}] SQ MIDI Protocol manager initialized.")
-
-    def send_message(self, msg: SQMidiMessage):
-        """
-        Sends a sequence of MIDI messages corresponding to the command.
-        """
-        try:
-            # 1. Get the list of raw bytes from the message class.
-            command_list = msg.get_command()
-            
-            # (Ensure it's a list for iteration)
-            if not isinstance(command_list, list):
-                command_list = [command_list] # Wrap single message in list
-
-            print(f"[{self._host}:{self._port}] {msg.command} sending {len(command_list)} message(s)...")
-
-            # 2. Iterate and publish each message to the socket.
-            for i, data_bytes in enumerate(command_list):
-                self._sock.sendall(data_bytes)
-                print(f"  [{self._host}:{self._port}] Sent message {i+1}/{len(command_list)} (len={len(data_bytes)}): {data_bytes.hex(' ')}")
-
-                # 3. Handle MIDI responses (if any).
-                try:
-                    self._sock.settimeout(0.02) # Very short timeout for sequential messages
-                    data = self._sock.recv(1024)
-                    if data:
-                        print(f"  [{self._host}:{self._port}] Response Received: (len={len(data)}): {data.hex(' ')}")
-                        msg.handle_response(data)
-                except socket.timeout:
-                    # This is the normal/expected case when expecting no immediate response
-                    pass
-                
-                # Short pause between messages in a sequence
-                if len(command_list) > 1:
-                    time.sleep(0.01) # Small delay to ensure mixer processes messages sequentially
-            
-            print(f"[{self._host}:{self._port}] {msg.command} sequence complete.")
-
-        except Exception as ex:
-            print(f"[{self._host}:{self._port}] Error sending command '{msg.command}': {ex}", file=sys.stderr)
-        
-        # Reset timeout for the main connection manager
-        finally:
-            self._sock.settimeout(0.5) 
-            time.sleep(0.05) # Give the mixer a moment to process before next command
-
-    def listen_blocking(self) -> bytes:
-        """
-        Sets the socket to blocking mode and waits to receive data.
-        Returns the raw bytes received.
-        """
-        try:
-            # Set a short timeout (e.g., 0.5 seconds) so the loop
-            # can be interrupted by a KeyboardInterrupt
-            self._sock.settimeout(0.5) 
-            data = self._sock.recv(1024)
-            return data
-        except socket.timeout:
-            # This is expected if no data arrives in 0.5s
-            # Return None to signal the main loop to continue
-            return None
-        except Exception as e:
-            print(f"[{self._host}:{self._port}] Error while listening: {e}", file=sys.stderr)
-            # Re-raise to break the loop
-            raise
-
-
+# --- Socket/Protocol Classes (Unchanged) ---
 class SocketConnection:
     """
     Context Manager for establishing and cleanly closing the TCP socket connection.
     Usage: with SocketConnection(host, port) as protocol: ...
     """
     def __init__(self, host: str, port: int, family: int = socket.AF_INET, type: int = socket.SOCK_STREAM):
-        self._host = host
-        self._port = port
-        self._family = family
-        self._type = type
+        self.host = host
+        self.port = port
+        self.family = family
+        self.type = type
         self.sock: Optional[socket.socket] = None
-        print(f"[{host}:{port}] Initialized socket connection manager.")
+        print(f"[{host}:{port}] Initialized SQ socket manager.")
 
-    def __enter__(self) -> SQMidiProtocol:
+    def __enter__(self) -> 'SQMidiProtocol':
         """
-        Connects the socket and returns the SQMidiProtocol object.
+        Creates and connects the socket, then returns the SQMidiProtocol manager.
         """
         try:
-            self.sock = socket.socket(self._family, self._type)
-            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            print(f"[{self._host}:{self._port}] Attempting to connect...")
-            self.sock.settimeout(2.0) # Give more time for initial connect
-            self.sock.connect((self._host, self._port))
-            # Return the new SQMidiProtocol manager
-            return SQMidiProtocol(self.sock, self._host, self._port)
-
+            self.sock = socket.socket(self.family, self.type)
+            print(f"[{self.host}:{self.port}] SQ socket created.")
+            print(f"[{self.host}:{self.port}] Attempting to connect to SQ Mixer...")
+            
+            # Use a short timeout for connection since it's local
+            self.sock.settimeout(2.0) 
+            self.sock.connect((self.host, self.port))
+            self.sock.settimeout(0.5) # Reset to short timeout for listening
+            
+            # Return the high-level manager instance
+            return SQMidiProtocol(self.sock, self.host, self.port)
+        
         except Exception as e:
             if self.sock:
                 self.sock.close()
-            print(f"[{self._host}:{self._port}] Connection failed: {e}", file=sys.stderr)
+            print(f"[{self.host}:{self.port}] SQ connection failed: {e!r}", file=sys.stderr)
             raise
 
     def __exit__(self, exc_type: Optional[type], exc_value: Optional[BaseException], traceback: Optional[Any]) -> bool:
         """
-        Closes the socket when exiting the 'with' block.
+        Executed upon exiting the 'with' block. Ensures the socket is closed.
         """
         if self.sock:
             self.sock.close()
-            print(f"[{self._host}:{self._port}] Connection closed.")
-        
-        # If an exception occurred, we want to re-raise it
-        if exc_value:
-            return False
-        return True
+            print(f"[{self.host}:{self.port}] SQ socket closed.")
+        # Returning False re-raises any exception that occurred inside the 'with' block
+        return False
 
 
-# --- SQ MIDI MESSAGE IMPLEMENTATIONS ---
+class SQMidiProtocol:
+    """
+    A wrapper class that provides command passing over an established SQ connection.
+    """
+    def __init__(self, sock: socket.socket, host: str, port: int):
+        self._sock = sock
+        self._host = host
+        self._port = port
+        print(f"[{host}:{port}] SQ Protocol manager initialized.")
+
+    def listen_blocking(self) -> Optional[bytes]:
+        """
+        Blocks until data is received or the socket times out.
+        Returns the received raw bytes.
+        """
+        try:
+            # We don't expect responses, only incoming MIDI data (like SoftKeys)
+            data = self._sock.recv(1024)
+            if data:
+                # print(f"[{self._host}:{self._port}] RECV: {data.hex()}")
+                return data
+            return None
+        except socket.timeout:
+            return None
+        except Exception as ex:
+            print(f"[{self._host}:{self._port}] Error during listen: {ex!r}", file=sys.stderr)
+            raise # Re-raise to trigger connection restart
+
+    def send_message(self, msg: 'SQMidiMessage'):
+        """
+        Sends a sequence of MIDI commands (bytes) to the SQ mixer.
+        """
+        try:
+            # All SQMidiMessages define get_command() to return a list of bytes
+            commands = msg.get_command()
+            
+            # Send each message byte array individually
+            for command in commands:
+                self._sock.sendall(command)
+                # print(f"[{self._host}:{self._port}] SENT: {command.hex()}")
+                # Brief pause between messages to prevent overwhelming the mixer
+                time.sleep(0.005) 
+            
+            print(f"[{self._host}:{self._port}] Command SENT: {msg.command} ({len(commands)} messages)")
+
+        except Exception as ex:
+            print(f"[{self._host}:{self._port}] Error Sending SQ command: {ex!r}", file=sys.stderr)
+
+
+# --- Message Classes ---
+class SQMidiMessage:
+    command="BASECLASS"
+    
+    def get_command(self) -> List[bytes]:
+        raise NotImplementedError("get_command() not implemented")
+
 
 class RecallScene(SQMidiMessage):
     """
-    Sends MIDI Bank Select (CC 0, CC 32) and Program Change (PC)
-    messages to recall a scene (1-300).
-    
-    This logic is based on the "Scene" example in Generator.csv.
+    Recalls a Scene.
+    Uses Program Change (PC) and Bank Select (BS).
     """
     def __init__(self, scene_number: int, midi_channel: int = 1):
-        if not (1 <= scene_number <= 300):
-            raise ValueError("Scene number must be 1-300.")
         if not (1 <= midi_channel <= 16):
             raise ValueError("MIDI channel must be 1-16.")
             
-        self.command = f"RecallScene (Scene {scene_number})"
+        self.command = f"RecallScene ({scene_number})"
+        self.scene_number = scene_number
+        self.midi_channel_idx = midi_channel - 1
         
-        # Scene index is 0-299
-        scene_idx = scene_number - 1
+        # The SQ uses Bank LSB (CC 32) to select the Scene Bank (Bank 0 is Mix Mode)
+        # It then uses Program Change (PC) to select the scene.
+        # Bank MSB (CC 0) is typically used for a larger address space, but SQ seems to use it as 0x00.
         
-        # Scene 1-128 = Bank 0, Program 0-127
-        # Scene 129-256 = Bank 1, Program 0-127
-        # Scene 257-300 = Bank 2, Program 0-43
-        self.bank = scene_idx // 128
-        self.program = scene_idx % 128
-        self.midi_channel_idx = midi_channel - 1 # 0-indexed for status byte
+        # Scene number mapping:
+        # Scene 1 is PC 0
+        # Scene 99 is PC 98
+        self.program_change = scene_number - 1
+        
+        # Fixed Bank Select MSB (CC 0 / 0x00) and LSB (CC 32 / 0x00) for regular scenes
+        self.bank_select_msb = 0x00 
+        self.bank_select_lsb = 0x00 
 
     def get_command(self) -> List[bytes]:
-        """
-        Generates the Bank Select + Program Change byte sequence.
-        """
-        # Status bytes
-        cc_status = 0xB0 + self.midi_channel_idx
-        pc_status = 0xC0 + self.midi_channel_idx
-        
-        # Bank is a 14-bit value, but the SQ only uses Bank MSB (CC 0)
-        # for the high byte, and LSB (CC 32) for the low byte.
-        # SQ uses Bank: 0/1/2 for 1-128/129-256/257-300
-        bank_msb = 0x00
-        bank_lsb = self.bank
+        """Generates the Bank Select and Program Change sequence."""
+        status_byte = 0xB0 | self.midi_channel_idx
+        program_change_status = 0xC0 | self.midi_channel_idx
         
         # Message 1: Bank Select MSB (CC 0)
-        msg1 = bytes([cc_status, 0, bank_msb])
-        # Message 2: Bank Select LSB (CC 32)
-        msg2 = bytes([cc_status, 32, bank_lsb])
+        msg1 = bytes([status_byte, 0x00, self.bank_select_msb])
+        
+        # Message 2: Bank Select LSB (CC 32 / 0x20)
+        msg2 = bytes([status_byte, 0x20, self.bank_select_lsb])
+        
         # Message 3: Program Change
-        msg3 = bytes([pc_status, self.program])
+        msg3 = bytes([program_change_status, self.program_change])
         
         return [msg1, msg2, msg3]
 
 
 class SetMuteNRPN(SQMidiMessage):
     """
-    Sets the mute status of a channel crosspoint (e.g., IP1 -> LR) or a master channel (e.g., LR Master).
+    Sets the Mute status of a channel crosspoint.
     Control Type: Mute (Base Address 0x0000)
-    Value: 0 (Off), 1 (On)
+    Value: 0 (Unmute/Off), 1 (Mute/On)
     """
     def __init__(self, from_ch: str, to_ch: str, mute_on: bool, midi_channel: int = 1):
+        """
+        Initializes the mute command.
+        :param mute_on: The mute state (True for Mute On, False for Mute Off).
+        """
         if not (1 <= midi_channel <= 16):
             raise ValueError("MIDI channel must be 1-16.")
             
         self.command = f"SetMute ({(from_ch, to_ch)} -> {'ON' if mute_on else 'OFF'})"
-        self.midi_channel_idx = midi_channel - 1 # 0-indexed
+        self.midi_channel_idx = midi_channel - 1
         
         # 1. Get the NRPN Address from the database
         self.nrpn_address = sq_midi_db.get_nrpn_address("Mute", from_ch, to_ch)
         
-        # 2. Set the NRPN Value (0 or 1)
+        # 2. Set the NRPN Value (Mute uses the LSB only)
+        # Note: The SQ uses the 14-bit NRPN data field, but for mute the LSB holds the 0/1 state.
         self.nrpn_value = 1 if mute_on else 0
 
     def get_command(self) -> List[bytes]:
@@ -310,20 +323,21 @@ class SetMuteNRPN(SQMidiMessage):
 
 class SetFaderLevelNRPN(SQMidiMessage):
     """
-    Sets the fader level of a channel crosspoint or a master channel.
+    Sets the Fader/Send level of a channel crosspoint.
     Control Type: Fader (Base Address 0x4000)
-    Value: 14-bit (0-16383)
+    Value: 14-bit level (0 to 16383)
     """
     def __init__(self, from_ch: str, to_ch: str, level: int, midi_channel: int = 1):
         """
         Initializes the fader level command.
-        :param level: The fader level (0-16383). Use db_to_fader_level() helper.
+        :param level: The 14-bit fader level (0-16383). Use db_to_fader_level() to convert from dB.
         """
-        if not (0 <= level <= 16383):
-            raise ValueError("MIDI level must be 0-16383 (14-bit).")
         if not (1 <= midi_channel <= 16):
             raise ValueError("MIDI channel must be 1-16.")
-        
+        if not (0 <= level <= 16383):
+             print(f"Warning: Fader level {level} outside 0-16383 range. Clamping.", file=sys.stderr)
+             level = max(0, min(16383, level))
+            
         self.command = f"SetFaderLevel ({(from_ch, to_ch)} -> {level})"
         self.midi_channel_idx = midi_channel - 1
         
@@ -344,20 +358,21 @@ class SetFaderLevelNRPN(SQMidiMessage):
 
 class SetPanNRPN(SQMidiMessage):
     """
-    Sets the Pan/Balance of a channel crosspoint or a master channel.
+    Sets the Pan/Balance level of a channel crosspoint.
     Control Type: Pan (Base Address 0x5000)
-    Value: 14-bit (0-16383)
+    Value: 14-bit level (0-16383)
     """
     def __init__(self, from_ch: str, to_ch: str, pan_value: int, midi_channel: int = 1):
         """
         Initializes the pan command.
-        :param pan_value: The pan value (0-16383). Use pan_to_value() helper.
+        :param pan_value: The 14-bit pan value (0-16383). Use pan_to_value() to convert from float.
         """
-        if not (0 <= pan_value <= 16383):
-            raise ValueError("Pan value must be 0-16383 (14-bit).")
         if not (1 <= midi_channel <= 16):
             raise ValueError("MIDI channel must be 1-16.")
-        
+        if not (0 <= pan_value <= 16383):
+             print(f"Warning: Pan value {pan_value} outside 0-16383 range. Clamping.", file=sys.stderr)
+             pan_value = max(0, min(16383, pan_value))
+            
         self.command = f"SetPan ({(from_ch, to_ch)} -> {pan_value})"
         self.midi_channel_idx = midi_channel - 1
         
@@ -396,7 +411,7 @@ class SetAssignNRPN(SQMidiMessage):
         # 1. Get the NRPN Address from the database
         self.nrpn_address = sq_midi_db.get_nrpn_address("Assign", from_ch, to_ch)
         
-        # 2. Set the NRPN Value (0 or 1)
+        # 2. Set the NRPN Value
         self.nrpn_value = 1 if assign_on else 0
 
     def get_command(self) -> List[bytes]:

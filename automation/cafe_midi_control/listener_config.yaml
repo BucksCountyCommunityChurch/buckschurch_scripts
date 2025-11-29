@@ -10,11 +10,11 @@ config:
     channel: 1
 
   SQ:
-    ip: "192.168.7.158"
+    ip: "192.168.8.177"
     port: 51325
 
   Kramer:
-    ip: "192.168.7.100"
+    ip: "192.168.8.246"
     port: 5000
 
 # --- Presets ---
@@ -31,38 +31,119 @@ config:
 #
 # --- Kramer Commands ---
 # - "Route": <source_number>
+# - "VideoMute": <flag: 0 = enable, 1 = disable, 2 = blank>
 #
+
+# Preset needs:
+# - User Laptop video and audio
+# - Cafe Laptop video and audio
+# - Sanctuary Video and audio feed
+# - BluRay/DVD Video and Audio
+# - Headphone/Bluetooth Audio, Video off
+# - Mute Everything, video Off
+# Note: Full-band music and other advanced mixing is not preconfigured.
+
+# SQ Channel configuration:
+# LR = Main out
+# IP1 = Video
+# IP2 = Headphone
+# IP3 = Bluetooth Audio
+# IP4 = Wireless Handheld
+# IP5 = Lapel Mic
+
+# Kramer Channel configuration:
+# Source 1 = User Laptop
+# Source 2 = Cafe Laptop
+# Source 3 = Sanctuary Video feed
+# Source 4 = BluRay/DVD
+
 presets:
-  "C3":
+  "C3": # User Laptop video and audio
     "SQ":
       - "RecallScene": 1
       - "Wait": 2.5
       - "SetMute": [ "IP1", "LR", false ]
       - "SetMute": [ "LR", "LR", false ]
+      - "SetFaderLevel": [ "LR", "LR", 0.0 ]
       - "SetFaderLevel": [ "IP1", "LR", 0.0 ]
-      - "SetMute": [ "IP2", "LR", true ]
       - "SetMute": [ "IP3", "LR", true ]
-      - "SetMute": [ "IP4", "LR", true ]
       - "SetMute": [ "IP5", "LR", true ]
-      - "SetMute": [ "IP6", "LR", true ]
+      - "SetMute": [ "IP7", "LR", true ]
+      - "SetMute": [ "IP8", "LR", true ]
+    "Kramer":
+      - "VideoMute": 0
+      - "Route": 1
+  "C#3": # Cafe Laptop video and audio
+    "SQ":
+      - "RecallScene": 1
+      - "Wait": 2.5
+      - "SetMute": [ "IP1", "LR", false ]
+      - "SetMute": [ "LR", "LR", false ]
+      - "SetFaderLevel": [ "LR", "LR", 0.0 ]
+      - "SetFaderLevel": [ "IP1", "LR", 0.0 ]
+      - "SetMute": [ "IP3", "LR", true ]
+      - "SetMute": [ "IP5", "LR", true ]
+      - "SetMute": [ "IP7", "LR", true ]
+      - "SetMute": [ "IP8", "LR", true ]
+    "Kramer":
+      - "VideoMute": 0
+      - "Route": 2
+  "D3": # Sanctuary Video and audio feed
+    "SQ":
+      - "RecallScene": 1
+      - "Wait": 2.5
+      - "SetMute": [ "IP1", "LR", false ]
+      - "SetMute": [ "LR", "LR", false ]
+      - "SetFaderLevel": [ "LR", "LR", 0.0 ]
+      - "SetFaderLevel": [ "IP1", "LR", 0.0 ]
+      - "SetMute": [ "IP3", "LR", true ]
+      - "SetMute": [ "IP5", "LR", true ]
+      - "SetMute": [ "IP7", "LR", true ]
+      - "SetMute": [ "IP8", "LR", true ]
+    "Kramer":
+      - "VideoMute": 0
+      - "Route": 3
+  "D#3": # BluRay/DVD Video and Audio
+    "SQ":
+      - "RecallScene": 1
+      - "Wait": 2.5
+      - "SetMute": [ "IP1", "LR", false ]
+      - "SetMute": [ "LR", "LR", false ]
+      - "SetFaderLevel": [ "LR", "LR", 0.0 ]
+      - "SetFaderLevel": [ "IP1", "LR", 0.0 ]
+      - "SetMute": [ "IP3", "LR", true ]
+      - "SetMute": [ "IP5", "LR", true ]
+      - "SetMute": [ "IP7", "LR", true ]
+      - "SetMute": [ "IP8", "LR", true ]
+    "Kramer":
+      - "VideoMute": 0
+      - "Route": 4
+  "E3": # Headphone/Bluetooth Audio, Video off
+    "SQ":
+      - "RecallScene": 1
+      - "Wait": 2.5
+      - "SetMute": [ "IP3", "LR", false ]
+      - "SetMute": [ "IP5", "LR", false ]
+      - "SetMute": [ "LR", "LR", false ]
+      - "SetFaderLevel": [ "LR", "LR", 0.0 ]
+      - "SetFaderLevel": [ "IP3", "LR", 0.0 ]
+      - "SetFaderLevel": [ "IP5", "LR", 0.0 ]
+      - "SetMute": [ "IP1", "LR", true ]
       - "SetMute": [ "IP7", "LR", true ]
       - "SetMute": [ "IP8", "LR", true ]
     "Kramer":
       - "Route": 1
-
-  "D3":
+      - "VideoMute": 2
+  "F3": # Mute Everything, video Off
     "SQ":
-      - "RecallScene": 2
+      - "RecallScene": 1
       - "Wait": 2.5
-      - "SetMute": [ "IP2", "LR", false ]
       - "SetMute": [ "LR", "LR", false ]
-      - "SetFaderLevel": [ "IP2", "LR", 0.0 ]
       - "SetMute": [ "IP1", "LR", true ]
       - "SetMute": [ "IP3", "LR", true ]
-      - "SetMute": [ "IP4", "LR", true ]
       - "SetMute": [ "IP5", "LR", true ]
-      - "SetMute": [ "IP6", "LR", true ]
       - "SetMute": [ "IP7", "LR", true ]
       - "SetMute": [ "IP8", "LR", true ]
     "Kramer":
-      - "Route": 2
+      - "Route": 1
+      - "VideoMute": 2

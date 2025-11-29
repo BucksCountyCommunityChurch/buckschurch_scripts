@@ -22,10 +22,11 @@ from sq_midi_controller import (
 )
 
 # --- Import Kramer Controller Code ---
-from kramer_controller import (
+from proto3k import (
     KramerSocketConnection,
     KramerProtocol,
-    Route as KramerRoute
+    Route as KramerRoute,
+    VideoMute as KramerVideoMute
 )
 
 # --- Import MIDI Note Definitions ---
@@ -145,6 +146,11 @@ def execute_preset(preset_name: str, actions: dict, sq_ctrl: SQMidiProtocol, kra
                     # For now, assumes args is just the source
                     kramer_ctrl.send_message(KramerRoute(source=int(args)))
                 
+                elif command == "VideoMute":
+                    # Support for optional dest/layer from YAML in the future
+                    # For now, assumes args is just the enable/disable/blank flags
+                    kramer_ctrl.send_message(KramerVideoMute(flag=int(args)))
+                
                 else:
                     print(f"Warning: Unknown Kramer command '{command}' in preset.")
                     
@@ -176,6 +182,9 @@ def parse_midi_message(data: bytes, sq_ctrl: SQMidiProtocol, kramer_ctrl: Kramer
                     note_name = NOTE_LOOKUP.get(note)
                     if note_name and note_name in presets:
                         actions = presets[note_name]
+                        execute_preset(note_name, actions, sq_ctrl, kramer_ctrl)
+                    elif note in presets:
+                        actions = presets[note]
                         execute_preset(note_name, actions, sq_ctrl, kramer_ctrl)
                     else:
                         print(f"[MIDI IN] Note {note} ('{note_name}') has no preset assigned.")
