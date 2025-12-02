@@ -5,9 +5,9 @@ SCRIPTS_REPO=$APP_DIR/buckschurch_scripts
 MIDI_PATH=$SCRIPTS_REPO/automation/cafe_midi_control
 
 
-echo ---- Refreshing the Git repo ----
-cd $SCRIPTS_REPO
-git pull
+#echo ---- Refreshing the Git repo ----
+#cd $SCRIPTS_REPO
+#git pull
 
 echo ---- Setting up the Virtual Environment ----
 if ! [ -e $APP_DIR/venv ] ; then
@@ -18,10 +18,10 @@ fi
 echo ---- Loading the Virtual Environment ----
 . $APP_DIR/venv/bin/activate
 
-echo ---- Getting the required python packages ----
-if [ -e $MIDI_PATH/requirements.txt ] ; then
-        pip install -r $MIDI_PATH/requirements.txt
-fi
+#echo ---- Getting the required python packages ----
+#if [ -e $MIDI_PATH/requirements.txt ] ; then
+#        pip install -r $MIDI_PATH/requirements.txt
+#fi
 
 echo ---- Running the controller ----
 cd $MIDI_PATH
